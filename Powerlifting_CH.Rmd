@@ -1,0 +1,522 @@
+---
+title: "Entwicklung von Powerlifting in der Schweiz"
+author: "Sandro Gassner"
+date: '26.11.2022'
+output: 
+  pdf_document:
+    number_sections: true
+    toc: true
+header-includes:
+  \renewcommand{\contentsname}{Inhalt}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r code, echo=FALSE, warning = FALSE, message = FALSE, results='hide', fig.show='hide'}
+#------------------------------------------------------------------------------#
+# Load Data & Packages
+#------------------------------------------------------------------------------#
+
+# set working directory
+setwd("~/Documents/R/KDKS")
+
+# load packages
+library(data.table)
+library(tidyverse)
+library(stringr)
+library(knitr)
+library(kableExtra)
+library(RColorBrewer)
+library(ggpubr)
+library(reshape)
+
+# load dataset (https://openpowerlifting.gitlab.io/opl-csv/bulk-csv.html)
+data <- fread("openpowerlifting-2022-11-26-25c7d08e.csv", data.table = FALSE)
+
+# explore data
+str(data)
+
+#------------------------------------------------------------------------------#
+# Data Cleaning
+#------------------------------------------------------------------------------#
+
+# drop columns not needed
+data <- select(data, -c(Wilks, Glossbrenner, Goodlift, Tested, Country, State, 
+                        ParentFederation, MeetState))
+
+# add year colmun and delete date column
+data$Year <- as.integer(format(as.Date(data$Date), format = "%Y"))
+data <- select(data, -Date)
+
+# filter for competitons after 2001
+data <- data %>% filter(Year > 2001)
+
+# filter for meet country
+data <- data %>% filter(MeetCountry == "Switzerland")
+
+# delete athletes with no start
+data <- data[data$Place != "NS", ]
+
+# create over-divisions
+juniors <- c("Jun", "Junior", "Juniors", "Sub-Juniors", "T13-15", "T16-17",
+             "T18-19")
+
+masters <- c("M40-44", "M45-49", "M50-54", "M55-59", "M60-64", "M65-69", 
+             "M70-74", "Master I", "Master II", "Masters 1", "Masters 2",
+             "Masters 3", "Masters I", "Masters II")
+
+data$OverDivision[data$Division %in% juniors] <- "Juniors & Sub-Juniors"
+data$OverDivision[data$Division == "Open"] <- "Open"
+data$OverDivision[data$Division %in% masters] <- "Masters"
+
+# filter data until 2021
+# data <- data %>% filter(Year < 2023)
+
+#------------------------------------------------------------------------------#
+# Analysis: All Swiss Federations
+#------------------------------------------------------------------------------#
+
+# show federations
+unique(data$Federation)
+
+# filter for Swiss Powerlifting & KDKS
+data_swisspl <- data %>% filter(Federation == "SwissPL")
+data_kdks <- data %>% filter(Federation == "KDKS")
+data_sdfpf <- data %>% filter(Federation == "SDFPF")
+
+# data swiss total
+data_swiss_total <- rbind(data_swisspl, data_kdks, data_sdfpf)
+
+# absolute starts for all swiss federations
+starters_swiss_total <- data_swiss_total %>% count(Year, Federation)
+starters_swiss_total_wide <- starters_swiss_total %>% spread(Federation, n)
+starters_swiss_total_wide[is.na(starters_swiss_total_wide)] <- 0
+starters_swiss_total_wide <- starters_swiss_total_wide %>% mutate(Total = KDKS + SwissPL + SDFPF)
+
+# active lifters for all swiss federations
+lifters_swiss_total <- data_swiss_total %>% group_by(Name, Federation) %>% count(Year)
+lifters_swiss_total$n <- 1
+lifters_swiss_total <- lifters_swiss_total %>% group_by(Year, Federation) %>% count(n, name = "lifters")
+lifters_swiss_total <- lifters_swiss_total %>% select(-n)
+lifters_swiss_total_wide <- lifters_swiss_total %>% spread(Federation, lifters)
+lifters_swiss_total_wide[is.na(lifters_swiss_total_wide)] <- 0
+lifters_swiss_total_wide <- lifters_swiss_total_wide %>% mutate(Total = KDKS + SwissPL + SDFPF)
+
+#------------------------------------------------------------------------------#
+# Analysis: Swiss IPF-Affiliate
+#------------------------------------------------------------------------------#
+
+# delete Swiss Powerlifting after 2020
+data_swisspl <- data_swisspl %>% filter(Year < 2020)
+
+# join KDKS data and SwissPL data
+data <- rbind(data_swisspl, data_kdks)
+rm(data_kdks, data_swisspl)
+
+# filter for SBD competitions only
+data <- data %>% filter(Event == "SBD")
+
+# filter for male and female
+data_male <- data %>% filter(Sex == "M")
+data_female <- data %>% filter(Sex == "F")
+
+# calculate DOTS for men
+data_male$Dots <- data_male$TotalKg*(500/(-0.0000010930*data_male$BodyweightKg^4+0.0007391293*data_male$BodyweightKg^3-0.1918759221*data_male$BodyweightKg^2+24.0900756*data_male$BodyweightKg-307.75076))
+
+# calculate DOTS for women
+data_female$Dots <- data_female$TotalKg*(500/(-0.0000010706*data_female$BodyweightKg^4+0.0005158568*data_female$BodyweightKg^3-0.1126655495*data_female$BodyweightKg^2+13.6175032*data_female$BodyweightKg-57.96288))
+
+# join male and female data
+data <- rbind(data_male, data_female)
+rm(data_male, data_female)
+
+# show summary statistics
+summary(data)
+
+# show all competitions
+data %>% count(MeetName) %>% arrange(desc(n))
+
+# filter for national competitions
+relevant_meets <- c("Schweizermeisterschaft", "Deutschschweizer Meisterschaft",
+                    "Schweizer Meisterschaft", "Open Schweizermeisterschaft",
+                    "Schweizer Meisterschaft Open", 
+                    "Schweizer Meisterschaft/Championnat de Suisse open",
+                    "Deutschschweizer Meisterschaft Championnat de Suisse alémanique",
+                    "Schweizermeisterschaft Championnat Suisse",
+                    "Ostschweizermeisterschaft", "Championnat Suisse Romande",
+                    "Junior/Master Schweizermeisterschaft", 
+                    "Deutsch-Schweizermeisterschaft", 
+                    "Deutsch-Schweizermeisterschaft Championnat Suisse alémanique",
+                    "Junioren/Master und Bench Schweizer Meisterschaft",
+                    "Ost-Schweizermeisterschaft", "Championnats Suisse",
+                    "Schweizer Meisterschaft Junior/Master/Bench")
+
+data <- data[data$MeetName %in% relevant_meets, ]
+
+# count starters per year
+starters_year <- data %>% count(Year)
+
+# count starters per year and over-divison
+starters_year_division <- data %>% count(Year, OverDivision)
+starters_year_division_wide <- starters_year_division %>% spread(OverDivision, n)
+starters_year_division_wide[is.na(starters_year_division_wide)] <- 0
+starters_year_division_wide$Total <- starters_year_division_wide$`Juniors & Sub-Juniors`+ starters_year_division_wide$Masters + starters_year_division_wide$Open
+
+# count starters per year and sex
+starters_year_sex <- data %>% count(Year, Sex)
+colnames(starters_year_sex)[colnames(starters_year_sex) == 'Sex'] <- 'Geschlecht'
+starters_year_sex$Geschlecht[starters_year_sex$Geschlecht == "M"] <- "Männer"
+starters_year_sex$Geschlecht[starters_year_sex$Geschlecht == "F"] <- "Frauen"
+
+# calculate female share
+starters_year_sex_wide <- starters_year_sex %>% spread(Geschlecht, n)
+starters_year_sex_wide$Frauen[is.na(starters_year_sex_wide$Frauen)] <- 0
+starters_year_sex_wide$Frauenanteil <- round((starters_year_sex_wide$Frauen / (starters_year_sex_wide$Frauen + starters_year_sex_wide$Männer) * 100),2)
+
+# filter for podium
+data_podium <- data[data$Place != "G", ]
+data_podium <- data_podium[data_podium$Place != "DQ", ]
+data_podium$Place <- as.integer(data_podium$Place)
+data_podium <- data_podium %>% filter(Place < 4)
+
+# calculate mean dots by Year, Sex and Division
+dots_podium <- data_podium %>% group_by(Year, Sex, OverDivision) %>% summarise_at(vars(Dots), list(Dots = mean))
+colnames(dots_podium)[colnames(dots_podium) == 'Sex'] <- 'Geschlecht'
+dots_podium$Geschlecht[dots_podium$Geschlecht == "M"] <- "Männer"
+dots_podium$Geschlecht[dots_podium$Geschlecht == "F"] <- "Frauen"
+
+# filter podium dots by age division
+dots_podium_open <- dots_podium %>% filter(OverDivision == "Open")
+dots_podium_juniors <- dots_podium %>% filter(OverDivision == "Juniors & Sub-Juniors")
+dots_podium_masters <- dots_podium %>% filter(OverDivision == "Masters")
+
+dots_podium_open_wide <- dots_podium_open %>% spread(Geschlecht, Dots)
+dots_podium_open_wide <- select(dots_podium_open_wide, - OverDivision)
+
+dots_podium_juniors_wide <- dots_podium_juniors %>% spread(Geschlecht, Dots)
+dots_podium_juniors_wide <- select(dots_podium_juniors_wide, - OverDivision)
+
+dots_podium_masters_wide <- dots_podium_masters %>% spread(Geschlecht, Dots)
+dots_podium_masters_wide <- select(dots_podium_masters_wide, - OverDivision)
+
+# calculate mean dots by weight class for males
+weight_classes_male <- c("53", "59", "66", "74", "83", "93", "105", "120","120+")
+
+dots_podium_weight_male <- data_podium %>% 
+  group_by(Year, WeightClassKg, OverDivision) %>% 
+  summarise_at(vars(Dots), list(Dots = mean))
+
+dots_podium_weight_male <- dots_podium_weight_male %>% 
+  filter(OverDivision == "Open")
+
+dots_podium_weight_male <- 
+  dots_podium_weight_male[dots_podium_weight_male$WeightClassKg 
+                          %in% weight_classes_male, ]
+
+dots_podium_weight_male <- dots_podium_weight_male %>% filter(Year > 2018)
+
+dots_podium_weight_male$WeightClassKg <- 
+  factor(dots_podium_weight_male$WeightClassKg, levels = weight_classes_male)
+
+dots_podium_weight_male_wide <- dots_podium_weight_male %>% 
+  spread(WeightClassKg, Dots)
+
+dots_podium_weight_male_wide <- select(dots_podium_weight_male_wide, 
+                                       - OverDivision)
+
+# calculate mean dots by weight class for females
+weight_classes_female <- c("42", "47", "52", "57", "63", "69", "76", "84","84+")
+
+dots_podium_weight_female <- data_podium %>% 
+  group_by(Year, WeightClassKg, OverDivision) %>% 
+  summarise_at(vars(Dots), list(Dots = mean))
+
+dots_podium_weight_female <- dots_podium_weight_female %>% 
+  filter(OverDivision == "Open")
+
+dots_podium_weight_female <- 
+  dots_podium_weight_female[dots_podium_weight_female$WeightClassKg 
+                          %in% weight_classes_female, ]
+
+dots_podium_weight_female <- dots_podium_weight_female %>% filter(Year > 2018)
+
+dots_podium_weight_female$WeightClassKg <- 
+  factor(dots_podium_weight_female$WeightClassKg, levels = weight_classes_female)
+
+dots_podium_weight_female_wide <- dots_podium_weight_female %>% 
+  spread(WeightClassKg, Dots)
+
+dots_podium_weight_female_wide <- select(dots_podium_weight_female_wide, 
+                                       - OverDivision)
+
+```
+
+\newpage
+
+# Hinweise zu den Daten
+
+Für die nachfolgenden Darstellungen und Tabellen wurden ausschliesslich Daten von \
+https://www.openpowerlifting.org/ verwendet (Stand: 15. September 2022). Wettkämpfe, welche nicht auf Open Powerlifting erfasst wurden, werden daher nicht berücksichtigt. Resultate von Schweizer Athletinnen und Athleten an internationalen Wettkämpfen (z.B. EPF oder IPF) wurden herausgefiltert.
+
+# Entwicklungen über alle Schweizer Verbände
+
+Die Abbildungen und Tabllen in diesem Abschnitt umfassen Resultate des Kraftdreikampfverbands Schweiz (KDKS), von Swiss Powerlifting (SwissPL) und der Swiss Drug-Free Powerlifting Federation (SDFPF). Es wurden alle Wettkämpfe (inkl. Single-Lift- und Equipped-Events) berücksichtigt, welche in der Schweiz stattgefunden haben und auf Open Powerlifting erfasst wurden.
+
+## Starts an allen Wettkämpfen pro Jahr und Verband
+
+Die nachfolgende Grafik beinhaltet die absolute Anzahl an Starts an sämtlichen Wettkämpfen des entsprechenden Verbands pro Jahr. Dementsprechend werden zum Beispiel Personen, welche an zwei Wettkämpfen teilgenommen haben, doppelt gezählt. \
+
+```{r, echo=FALSE, fig.dim = c(8, 5)}
+# plot absolute starts at competitions for all swiss federations
+ggplot(starters_swiss_total, aes(x = Year, y = n, group = Federation)) +
+  geom_line(aes(color = Federation)) +
+  geom_point(aes(color = Federation)) +
+  xlab("Jahr") +
+  ylab("Anzahl") +
+  labs(color="Verband") +
+  theme(legend.position="bottom", text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(starters_swiss_total$Year),
+                                  max(starters_swiss_total$Year), by = 4))
+```
+
+\newpage
+
+## Anzahl aktiver Athletinnen und Athleten pro Jahr und Verband
+
+Die untenstehende Abbildung zeigt die Anzahl der Athletinnen und Athleten, welche im entsprechenden Jahr mindestens an einem Wettkampf teilgenommen haben. Personen, welche mehrere Wettkämpfe in einem Jahr absolviert haben, werden daher nur einmal pro Jahr gezählt. \
+
+
+```{r, echo=FALSE, fig.dim = c(8, 5)}
+# plot active lifters for all swiss federations
+ggplot(lifters_swiss_total, aes(x = Year, y = lifters, group = Federation)) +
+  geom_line(aes(color = Federation)) +
+  geom_point(aes(color = Federation)) +
+  xlab("Jahr") +
+  ylab("Anzahl") +
+  labs(color="Verband") +
+  theme(legend.position="bottom", text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(lifters_swiss_total$Year),
+                                  max(lifters_swiss_total$Year), by = 4))
+```
+
+\newpage
+
+## Daten
+
+```{r, echo = FALSE}
+kable(starters_swiss_total_wide,
+      col.names = c("Jahr", "KDKS", "SDFPF", "SwissPL", "Total"),
+      caption = "Total Starts an allen Wettkämpfen pro Verband") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(lifters_swiss_total_wide, 
+      col.names = c("Jahr", "KDKS", "SDFPF", "SwissPL", "Total"),
+      caption = "Anzahl aktiver Athletinnen und Athleten pro Jahr und Verband") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+```
+
+\newpage
+
+# Entwicklungen innerhalb des Schweizer IPF-Affiliates
+
+Für die nachfolgenden Tabellen und Grafiken wurden nur nationale und überregionale Wettkämpfe wie die Schweizer-, Deutschschweizer- Westschweizer- oder Ostschweizermeisterschaft von Swiss Powerlifting und vom KDKS berücksichtigt. Es wurden lediglich Resultate von Full-Powerlifting-Meets (Squat, Bench und Deadlift) verwendet. Ab 2020 wurden nur noch die Resultate von KDKS-Wettkämpfen herangezogen. Achtung: Unter Swiss Powerlifting bzw. bis und mit 2019 waren Knee Wraps erlaubt!
+
+## Starts an nationalen Wettkämpfen (Full-Powerlifting-Meets)
+
+```{r, echo=FALSE, fig.dim = c(8, 4)}
+# plot starters per year
+ggplot(starters_year, aes(x = Year, y = n)) +
+  geom_line() +
+  geom_point() +
+  xlab("Jahr") +
+  ylab("Anzahl") +
+  theme(text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(starters_year$Year),
+                                  max(starters_year$Year), by = 4))
+```
+
+## Starts an nationalen Wettkämpfen nach Geschlecht
+
+```{r, echo=FALSE, fig.dim = c(8, 4)}
+# plot starters per year and sex
+ggplot(starters_year_sex, aes(x = Year, y = n, group = Geschlecht)) +
+  geom_line(aes(color = Geschlecht)) +
+  geom_point(aes(color = Geschlecht)) +
+  xlab("Jahr") +
+  ylab("Anzahl") +
+  theme(legend.position="bottom", text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(starters_year_sex$Year),
+                                  max(starters_year_sex$Year), by = 4))
+```
+
+## Starts an nationalen Wettkämpfen nach Alterskategorie
+
+```{r, echo=FALSE, fig.dim = c(8, 5)}
+# plot starters per year and division
+ggplot(na.omit(starters_year_division), aes(x = Year, y = n, group = OverDivision)) +
+  geom_line(aes(color = OverDivision)) +
+  geom_point(aes(color = OverDivision)) +
+  xlab("Jahr") +
+  ylab("Anzahl") +
+  labs(color="Alterskategorie") +
+  theme(legend.position="bottom", text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(starters_year_division$Year),
+                                  max(starters_year_division$Year), by = 4))
+```
+
+## Frauenanteil an nationalen Wettkämpfen
+
+```{r, echo=FALSE, fig.dim = c(8, 4)}
+# plot female share
+ggplot(starters_year_sex_wide, aes(x = Year, y = Frauenanteil)) +
+  geom_line() +
+  geom_point() +
+  xlab("Jahr") +
+  ylab("Frauenanteil in %") +
+  theme(text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(starters_year_sex_wide$Year),
+                                  max(starters_year_sex_wide$Year), by = 4))
+```
+\newpage
+
+## Average DOTS Podium (Open)
+
+**Achtung:** Unter Swiss Powerlifting bzw. bis und mit 2019 waren Knee Wraps erlaubt! \
+
+```{r, echo=FALSE, fig.dim = c(8, 4)}
+# plot podium DOTS open
+ggplot(dots_podium_open, aes(x = Year, y = Dots, group = Geschlecht)) +
+  geom_line(aes(color = Geschlecht)) +
+  geom_point(aes(color = Geschlecht)) +
+  xlab("Jahr") +
+  ylab("Avg. DOTS Podium") +
+  theme(legend.position="bottom", text = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(min(dots_podium_open$Year),
+                                  max(dots_podium_open$Year), by = 4))
+```
+
+## Average DOTS Podium (Open) Männer Vergleich
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, fig.dim = c(8, 4)}
+# plot dots for male weight classes in category open
+ggdotchart(dots_podium_weight_male, x = "Year", y = "Dots",
+           color = "WeightClassKg", group="WeightClassKg",
+           size = 3,
+           add = "segment",
+           sorting = "none",
+           rotate = FALSE,
+           position = position_dodge(0.7),
+           add.params = list(color = "lightgray", size = 1.5), 
+           ggtheme = theme_pubr(),
+           legend = "bottom",
+           xlab = "Jahr",
+           ylab = "Avg. DOTS Podium",
+           font.x = 14,
+           font.y = 14,
+           font.legend = 14,
+           font.tickslab = 14,
+           ylim = c(250, 500))
+```
+
+## Average DOTS Podium (Open) Frauen Vergleich
+
+```{r, echo=FALSE, fig.dim = c(8, 4), warning = FALSE, message = FALSE}
+# plot dots for female weight classes in category open
+ggdotchart(dots_podium_weight_female, x = "Year", y = "Dots",
+           color = "WeightClassKg", group="WeightClassKg",
+           size = 3,
+           add = "segment",
+           sorting = "none",
+           position = position_dodge(0.5),
+           add.params = list(color = "lightgray", size = 1.5), 
+           ggtheme = theme_pubr(),
+           legend = "bottom",
+           xlab = "Jahr",
+           ylab = "Avg. DOTS Podium",
+           font.x = 14,
+           font.y = 14,
+           font.legend = 14,
+           font.tickslab = 14,
+           ylim = c(250, 500))
+```
+
+## Average DOTS Podium (Open) Männer Entwicklung
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, fig.dim = c(8, 5)}
+# plot dots for male weight classes in category open
+ggplot(dots_podium_weight_male, aes(Year, Dots, group = WeightClassKg)) +
+  geom_line(aes(color = WeightClassKg)) +
+  geom_point(aes(color = WeightClassKg)) + 
+  facet_wrap(~ WeightClassKg) +
+  xlab("Jahr") +
+  ylab("Avg. DOTS Podium") +
+  theme(legend.position="none", text = element_text(size = 15), 
+        axis.text.x = element_text(angle = 45, hjust=1),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.minor = element_blank()) +
+  scale_x_continuous(breaks = seq(min(dots_podium_weight_male$Year),
+                                  max(dots_podium_weight_male$Year), by = 1))
+```
+
+## Average DOTS Podium (Open) Frauen Entwicklung
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, fig.dim = c(8, 5)}
+# plot dots for male weight classes in category open
+ggplot(dots_podium_weight_female, aes(Year, Dots, group = WeightClassKg)) +
+  geom_line(aes(color = WeightClassKg)) +
+  geom_point(aes(color = WeightClassKg)) + 
+  facet_wrap(~ WeightClassKg) +
+  xlab("Jahr") +
+  ylab("Avg. DOTS Podium") +
+  theme(legend.position="none", text = element_text(size = 15), 
+        axis.text.x = element_text(angle = 45, hjust=1),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.minor = element_blank()) +
+  scale_x_continuous(breaks = seq(min(dots_podium_weight_female$Year),
+                                  max(dots_podium_weight_female$Year), by = 1))
+```
+
+## Daten
+
+```{r, echo = FALSE}
+kable(starters_year_division_wide, 
+      col.names = c("Jahr", "Juniors & Sub-Juniors", "Masters", "Open", "Total"),
+      caption = "Starts an nationalen Wettkämpfen nach Alterskategorie") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(starters_year_sex_wide, 
+      col.names = c("Jahr", "Frauen", "Männer", "Frauenanteil (in %)"),
+      caption = "Starts an nationalen Wettkämpfen nach Geschlecht") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(dots_podium_open_wide,
+      col.names = c("Jahr", "Frauen", "Männer"),
+      caption = "Average DOTS Podium (Open)") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(dots_podium_masters_wide, 
+      col.names = c("Jahr", "Frauen", "Männer"),
+      caption = "Average DOTS Podium (Masters)") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(dots_podium_juniors_wide, 
+      col.names = c("Jahr", "Frauen", "Männer"),
+      caption = "Average DOTS Podium (Sub-/Juniors)") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+```
+
+\newpage
+
+```{r, echo = FALSE}
+kable(dots_podium_weight_male_wide, 
+      caption = "Average DOTS Podium (Open) pro Gewichtsklasse der Männer") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+kable(dots_podium_weight_female_wide, 
+      caption = "Average DOTS Podium (Open) pro Gewichtsklasse der Frauen") %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+
+```
