@@ -80,8 +80,6 @@ Diese Analysen zeigen die Anzahl der Starts und die durchschnittlichen DOTS-Wert
 
 Die Ergebnisse der Analysen werden in Form von Tabellen und Grafiken dargestellt, um die Entwicklungen im Powerlifting in der Schweiz zu visualisieren. Die Analysen zeigen Trends in der Anzahl der Starts, der aktiven Athleten, der Geschlechterverteilung und der Leistungsentwicklung über die letzten 20 Jahre.
 
----
-
 ## Kontakt
 
 Für Fragen oder Anmerkungen kann der Kraftdreikampfverband Schweiz unter [inanzen@kraftdreikampf] kontaktiert werden.
