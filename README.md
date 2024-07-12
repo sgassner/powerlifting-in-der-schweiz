@@ -82,4 +82,4 @@ Die Ergebnisse der Analysen werden in Form von Tabellen und Grafiken dargestellt
 
 ## Kontakt
 
-Für Fragen oder Anmerkungen kann der Kraftdreikampfverband Schweiz unter [inanzen@kraftdreikampf] kontaktiert werden.
+Für Fragen oder Anmerkungen kann der Kraftdreikampfverband Schweiz unter [finanzen@kraftdreikampf.ch] kontaktiert werden.
